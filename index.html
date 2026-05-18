@@ -435,22 +435,7 @@
         .or-divider:not(:empty)::after {
             margin-left: .8em;
         }
-        .sync-loader {
-            position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(9, 9, 14, 0.85);
-            backdrop-filter: blur(8px);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 100;
-            border-radius: var(--radius-lg);
-            font-weight: 700;
-            color: var(--secondary);
-            letter-spacing: 2px;
-            font-size: 1.1rem;
-        }
+
         .firebase-status-bar {
             margin-top: 20px;
             font-size: 0.75rem;
@@ -639,13 +624,7 @@ const firebaseConfig = {
     </div>
 
     <div class="study-card" style="position: relative;">
-        <!-- Sync Loading Overlay -->
-        <div id="syncLoader" class="sync-loader" style="display: none;">
-            <div style="display: flex; flex-direction: column; align-items: center; gap: 15px;">
-                <div style="width: 32px; height: 32px; border: 3px solid rgba(0, 240, 255, 0.15); border-top-color: var(--secondary); border-radius: 50%; animation: spin 0.8s linear infinite; box-shadow: 0 0 15px rgba(0, 240, 255, 0.2);"></div>
-                <span style="font-size: 0.9rem; font-weight: 800; letter-spacing: 2px; color: var(--secondary); text-shadow: 0 0 10px rgba(0, 240, 255, 0.3);">ĐANG TẢI DỮ LIỆU...</span>
-            </div>
-        </div>
+
 
         <!-- EN & ZH: QUIZ MODE -->
         <div id="quizModeView" class="type-mode-area active">
@@ -1504,7 +1483,6 @@ function clearFeedback() {
 
 function loadData() {
     const LOCAL_KEY = 'vocab_v12_' + currentUserEmail;
-    const loader = document.getElementById("syncLoader");
     
     // 1. TẢI NGAY DỮ LIỆU CÓ SẴN (từ Cache hoặc Bộ từ vựng mặc định trong tệp index.html)
     const cached = localStorage.getItem(LOCAL_KEY);
@@ -1534,12 +1512,6 @@ function loadData() {
     if (db) {
         updateSyncIndicator("syncing");
         
-        // Chỉ hiện màn hình chờ nếu hoàn toàn không có dữ liệu cache nào (lần đầu đăng nhập trên trình duyệt mới)
-        const hasNoData = !cached;
-        if (hasNoData && loader) {
-            loader.style.display = "flex";
-        }
-        
         // Khởi tạo Promise có giới hạn thời gian (Timeout 4 giây) tránh treo do mạng chậm
         const firebasePromise = db.ref(`users/${currentUserEmail}`).once('value');
         const timeoutPromise = new Promise((_, reject) => 
@@ -1562,7 +1534,6 @@ function loadData() {
                     localStorage.setItem(LOCAL_KEY, JSON.stringify(vocabGlobal));
                 }
                 
-                if (loader) loader.style.display = "none";
                 updateSyncIndicator("synced");
                 
                 // Đăng ký listener cập nhật thời gian thực khi có thay đổi trên máy chủ
@@ -1581,11 +1552,9 @@ function loadData() {
             })
             .catch((err) => {
                 console.warn("Đồng bộ Firebase ngầm chạy chậm/quá hạn hoặc gặp lỗi. Chạy chế độ Ngoại tuyến:", err);
-                if (loader) loader.style.display = "none";
                 updateSyncIndicator("offline");
             });
     } else {
-        if (loader) loader.style.display = "none";
         updateSyncIndicator("offline");
     }
 }
