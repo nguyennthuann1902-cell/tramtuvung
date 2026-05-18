@@ -1506,76 +1506,93 @@ function loadData() {
     const LOCAL_KEY = 'vocab_v12_' + currentUserEmail;
     const loader = document.getElementById("syncLoader");
     
-    if (loader) loader.style.display = "flex";
-    updateSyncIndicator("syncing");
+    // 1. TẢI NGAY DỮ LIỆU CÓ SẴN (từ Cache hoặc Bộ từ vựng mặc định trong tệp index.html)
+    const cached = localStorage.getItem(LOCAL_KEY);
+    let cachedData = null;
+    if (cached) {
+        try {
+            cachedData = JSON.parse(cached);
+        } catch(e) {
+            console.error("Lỗi đọc local cache:", e);
+        }
+    }
     
+    // Nếu chưa có cache, lấy bộ từ vựng gốc đi kèm tệp index.html
+    if (!cachedData) {
+        try {
+            cachedData = JSON.parse(BASE_DATA_STRING);
+        } catch(e) {
+            console.error("Lỗi đọc bộ từ vựng gốc:", e);
+        }
+    }
+    
+    // Hiển thị ngay bộ từ vựng để người dùng học lập tức (Không chờ đợi mạng)
+    processLoadedData(cachedData);
+    initApp();
+    
+    // 2. ĐỒNG BỘ HÓA NGẦM VỚI FIREBASE (Không chặn UI)
     if (db) {
-        db.ref(`users/${currentUserEmail}`).once('value')
+        updateSyncIndicator("syncing");
+        
+        // Chỉ hiện màn hình chờ nếu hoàn toàn không có dữ liệu cache nào (lần đầu đăng nhập trên trình duyệt mới)
+        const hasNoData = !cached;
+        if (hasNoData && loader) {
+            loader.style.display = "flex";
+        }
+        
+        // Khởi tạo Promise có giới hạn thời gian (Timeout 4 giây) tránh treo do mạng chậm
+        const firebasePromise = db.ref(`users/${currentUserEmail}`).once('value');
+        const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error("Timeout")), 4000)
+        );
+        
+        Promise.race([firebasePromise, timeoutPromise])
             .then((snapshot) => {
                 const val = snapshot.val();
-                const isNewUser = (val === null);
-                processLoadedData(val);
                 
-                // Cache loaded database value to localStorage so it works offline
-                localStorage.setItem(LOCAL_KEY, JSON.stringify(vocabGlobal));
-                
-                // Nếu là tài khoản mới hoàn toàn, khởi tạo ngay nhánh dữ liệu sạch trên máy chủ
-                if (isNewUser) {
-                    db.ref(`users/${currentUserEmail}`).set(vocabGlobal).catch(e => console.error("Lỗi khởi tạo node mới:", e));
+                if (val) {
+                    // Nếu trên Cloud đã có dữ liệu, cập nhật lại giao diện và lưu cache
+                    processLoadedData(val);
+                    localStorage.setItem(LOCAL_KEY, JSON.stringify(vocabGlobal));
+                    initApp();
+                } else {
+                    // Nếu là tài khoản mới tinh chưa có gì trên Cloud, tự động đẩy bộ dữ liệu đang có lên
+                    db.ref(`users/${currentUserEmail}`).set(vocabGlobal)
+                        .catch(e => console.error("Lỗi đồng bộ dữ liệu ban đầu:", e));
+                    localStorage.setItem(LOCAL_KEY, JSON.stringify(vocabGlobal));
                 }
-                
-                // Now start real-time listener to keep sync active
-                db.ref(`users/${currentUserEmail}`).on('value', (snap) => {
-                    if (isInitialLoad) {
-                        isInitialLoad = false;
-                        return; // already handled initial load
-                    }
-                    const freshData = snap.val();
-                    if (freshData) {
-                        processLoadedData(freshData);
-                        // Re-render UI on remote changes
-                        initApp();
-                    }
-                });
                 
                 if (loader) loader.style.display = "none";
                 updateSyncIndicator("synced");
                 
-                // Initialize the rest of the application
-                initApp();
+                // Đăng ký listener cập nhật thời gian thực khi có thay đổi trên máy chủ
+                db.ref(`users/${currentUserEmail}`).off('value'); // Xóa listener cũ
+                db.ref(`users/${currentUserEmail}`).on('value', (snap) => {
+                    if (isInitialLoad) {
+                        isInitialLoad = false;
+                        return;
+                    }
+                    const freshData = snap.val();
+                    if (freshData) {
+                        processLoadedData(freshData);
+                        initApp();
+                    }
+                });
             })
             .catch((err) => {
-                console.error("Firebase load failed, falling back to local storage:", err);
-                let localData = null;
-                try {
-                    const local = localStorage.getItem(LOCAL_KEY);
-                    if (local) localData = JSON.parse(local);
-                } catch(e) {
-                    console.error("Lỗi đọc local cache:", e);
-                }
-                processLoadedData(localData);
+                console.warn("Đồng bộ Firebase ngầm chạy chậm/quá hạn hoặc gặp lỗi. Chạy chế độ Ngoại tuyến:", err);
                 if (loader) loader.style.display = "none";
                 updateSyncIndicator("offline");
-                initApp();
             });
     } else {
-        let localData = null;
-        try {
-            const local = localStorage.getItem(LOCAL_KEY);
-            if (local) localData = JSON.parse(local);
-        } catch(e) {
-            console.error("Lỗi đọc local cache:", e);
-        }
-        processLoadedData(localData);
         if (loader) loader.style.display = "none";
         updateSyncIndicator("offline");
-        initApp();
     }
 }
 
 function processLoadedData(data) {
     if (!data) {
-        // Tài khoản mới đăng nhập lần đầu: Trả về Workspace sạch hoàn toàn
+        // Trường hợp khẩn cấp nếu cả file gốc lẫn cache đều lỗi
         vocabGlobal = {
             EN: {
                 "Workspace 1": {
